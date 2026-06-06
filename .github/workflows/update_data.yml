@@ -1,18 +1,39 @@
-name: Refresh Dataset
+name: Refresh Dataset & Deploy
 
 on:
   schedule:
-    - cron: '0 3 * * 1'   # Every Monday 03:00 UTC
-  workflow_dispatch:        # Also allow manual trigger from GitHub Actions tab
+    - cron: '0 3 * * 1'    # Every Monday 03:00 UTC
+  push:
+    branches: [main]        # Auto-deploy on every push to main
+  workflow_dispatch:        # Manual trigger from GitHub Actions tab
 
 jobs:
-  rebuild-and-publish:
+  # ── 1. Sync code to Hugging Face Spaces ──────────────────────────────────
+  deploy-hf:
     runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git remote add hf-space https://Qsecure:$HF_TOKEN@huggingface.co/spaces/Qsecure/global-football-scouting
+          git push hf-space main:main --force
+
+  # ── 2. Weekly data rebuild (only on schedule / manual) ───────────────────
+  rebuild-data:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     permissions:
-      contents: write       # needed to create/update a Release
+      contents: write
 
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Set up Python 3.11
@@ -29,12 +50,12 @@ jobs:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
         run: python prepare_data.py
 
-      - name: Upload processed CSVs to GitHub Release
+      - name: Publish CSVs to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: data-latest
           name: "Latest Dataset"
-          body: "Auto-updated by GitHub Actions on ${{ github.run_started_at }}"
+          body: "Auto-updated ${{ github.run_started_at }}"
           files: |
             all_players_data.csv
             team_clusters.csv
