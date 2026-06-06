@@ -7,4 +7,4 @@ requests>=2.31.0
 beautifulsoup4>=4.12.0
 anthropic>=0.30.0
 statsbombpy>=1.0.0
-socceraction>=1.4.0
+# socceraction requires pandas<2.0 — install locally with: pip install socceraction --no-deps
