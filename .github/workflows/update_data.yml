@@ -1,0 +1,42 @@
+name: Refresh Dataset
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'   # Every Monday 03:00 UTC
+  workflow_dispatch:        # Also allow manual trigger from GitHub Actions tab
+
+jobs:
+  rebuild-and-publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # needed to create/update a Release
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Build dataset
+        env:
+          RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
+        run: python prepare_data.py
+
+      - name: Upload processed CSVs to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: data-latest
+          name: "Latest Dataset"
+          body: "Auto-updated by GitHub Actions on ${{ github.run_started_at }}"
+          files: |
+            all_players_data.csv
+            team_clusters.csv
+          make_latest: true
+          token: ${{ secrets.GITHUB_TOKEN }}

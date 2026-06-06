@@ -33,6 +33,18 @@ from live_feed import (fetch_live_feed, transfers_to_df,
 
 warnings.filterwarnings("ignore")
 
+# ── Streamlit Cloud secrets → env vars bridge ────────────────────────────────
+# On Streamlit Community Cloud, set secrets via the dashboard (Settings → Secrets).
+# This block makes them available to os.getenv() throughout the app.
+try:
+    for _k in ("ANTHROPIC_API_KEY", "RAPIDAPI_KEY",
+                "LIVE_CACHE_TTL_HOURS", "FORMATION_CACHE_TTL_HOURS"):
+        if _k not in os.environ and hasattr(st, "secrets") and _k in st.secrets:
+            os.environ[_k] = str(st.secrets[_k])
+except Exception:
+    pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # LEAGUES  (corrected labels — underlying TM data already has correct clubs)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2249,20 +2261,51 @@ def _ensure_new_cols(df):
     return df
 
 
+_GITHUB_DATA_URL = (
+    "https://github.com/TemiKayode/Global-Football-Scouting-Analytics-Platform"
+    "/releases/download/data-latest"
+)
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_remote_csv(url: str) -> pd.DataFrame:
+    """Download a CSV from a URL; returns empty DataFrame on failure."""
+    try:
+        return pd.read_csv(url)
+    except Exception:
+        return pd.DataFrame()
+
+
 def load_data():
+    # 1. Try local files (dev / fresh download)
     if os.path.exists("all_players_data.csv") and os.path.exists("team_clusters.csv"):
         try:
             p = _ensure_new_cols(pd.read_csv("all_players_data.csv"))
             t = pd.read_csv("team_clusters.csv")
-            # Remove old synthetic SL1 Swiss rows; replace with real league name
             p.loc[p["league"]=="SL1","league_name"] = "Slovenian PrvaLiga"
             st.sidebar.success(f"Live data: {len(p):,} players · {len(t):,} teams")
             return p, t
         except Exception as e:
-            st.sidebar.warning(f"CSV error ({e}) — using simulation mode")
+            st.sidebar.warning(f"CSV error ({e}) — trying remote…")
+
+    # 2. Try GitHub Releases (cloud deployment / missing local files)
+    with st.sidebar:
+        with st.spinner("Downloading dataset from GitHub Releases…"):
+            p = _fetch_remote_csv(f"{_GITHUB_DATA_URL}/all_players_data.csv")
+            t = _fetch_remote_csv(f"{_GITHUB_DATA_URL}/team_clusters.csv")
+
+    if not p.empty and not t.empty:
+        try:
+            p = _ensure_new_cols(p)
+            p.loc[p["league"]=="SL1","league_name"] = "Slovenian PrvaLiga"
+            st.sidebar.success(f"Live data: {len(p):,} players · {len(t):,} teams")
+            return p, t
+        except Exception:
+            pass
+
+    # 3. Fallback — synthetic data
     p = generate_synthetic_players(700)
     t = generate_team_stats(p)
-    st.sidebar.info("Simulation mode — run build_data.ps1 or prepare_data.py for real data")
+    st.sidebar.info("Simulation mode — upload data to GitHub Releases for live dataset")
     return p, t
 
 
