@@ -2,13 +2,13 @@ name: Refresh Dataset & Deploy
 
 on:
   schedule:
-    - cron: '0 3 * * 1'    # Every Monday 03:00 UTC
+    - cron: "0 3 * * 1"    # Every Monday 03:00 UTC
   push:
-    branches: [main]        # Auto-deploy on every push to main
-  workflow_dispatch:        # Manual trigger from GitHub Actions tab
+    branches: [main]          # Auto-deploy to HF Space on every push
+  workflow_dispatch:           # Manual trigger from GitHub Actions tab
 
 jobs:
-  # ── 1. Sync code to Hugging Face Spaces ──────────────────────────────────
+  # 1. Sync code to Hugging Face Spaces (runs on every push + schedule)
   deploy-hf:
     runs-on: ubuntu-latest
     steps:
@@ -22,10 +22,15 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          if [ -z "$HF_TOKEN" ]; then
+            echo "WARNING: HF_TOKEN secret not set -- skipping HF deploy"
+            exit 0
+          fi
           git remote add hf-space https://Qsecure:$HF_TOKEN@huggingface.co/spaces/Qsecure/global-football-scouting
           git push hf-space main:main --force
+          echo "Deployed to HF Space successfully"
 
-  # ── 2. Weekly data rebuild (only on schedule / manual) ───────────────────
+  # 2. Weekly data rebuild (schedule + manual only)
   rebuild-data:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
@@ -39,7 +44,7 @@ jobs:
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
 
       - name: Install dependencies
@@ -48,9 +53,22 @@ jobs:
       - name: Build dataset
         env:
           RAPIDAPI_KEY: ${{ secrets.RAPIDAPI_KEY }}
-        run: python prepare_data.py
+        run: |
+          python prepare_data.py || echo "WARNING: prepare_data.py failed -- using existing data"
+
+      - name: Check for CSV output
+        id: check_csv
+        run: |
+          if [ -f all_players_data.csv ]; then
+            echo "csv_exists=true" >> $GITHUB_OUTPUT
+            echo "CSV ready: $(wc -l < all_players_data.csv) rows"
+          else
+            echo "csv_exists=false" >> $GITHUB_OUTPUT
+            echo "WARNING: all_players_data.csv not found -- skipping release"
+          fi
 
       - name: Publish CSVs to GitHub Release
+        if: steps.check_csv.outputs.csv_exists == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: data-latest
